@@ -77,6 +77,8 @@ nav button{position:relative}
 .oacts a,.oacts button{font:inherit;font-size:.85rem;text-decoration:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;min-height:38px;padding:0 12px;display:inline-flex;align-items:center;cursor:pointer}
 .oacts .done{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .list li.ord{display:block}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--mute);margin-inline-end:6px;vertical-align:middle}.dot.on{background:#1f9d55}
+.vbtn{font:inherit;font-size:.85rem;border:1px solid var(--line);background:var(--bg);color:var(--red);border-radius:10px;min-height:38px;padding:0 12px;cursor:pointer;white-space:nowrap}
 .list li.ord .top{display:flex;justify-content:space-between;gap:8px}
 .olist-done li{opacity:.6}
 nav button{font:inherit;font-size:.72rem;background:none;border:0;color:var(--mute);padding:8px 2px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:60px}
@@ -186,6 +188,7 @@ body.locked{overflow:hidden}
       <button role="menuitem" data-m="week">📅 التقرير الأسبوعي</button>
       <button role="menuitem" data-m="month">🗓️ التقرير الشهري</button>
       <button role="menuitem" data-m="delete">🗑️ حذف العمليات</button>
+      <button role="menuitem" data-m="devices">📱 الأجهزة المتصلة <small class="date" id="devTxt"></small></button>
       <button role="menuitem" data-m="lock">🔒 قفل التطبيق</button>
       <button role="menuitem" data-m="logout">🚪 تسجيل خروج</button>
     </div></div></header>
@@ -349,6 +352,13 @@ body.locked{overflow:hidden}
   <h2>الأكثر مبيعاً</h2><div class="box"><ul class="list" id="rTop"></ul></div>
   <div class="acts" style="grid-template-columns:1fr 1fr"><button class="btn wa" id="rWa">واتساب</button><button class="btn" id="rCopy">نسخ التقرير</button></div>
 </div></div>
+<div class="sheet" id="vSheet" hidden><div class="panel" role="dialog" aria-modal="true" aria-labelledby="vTitle">
+  <div class="acchead"><h2 id="vTitle" style="margin:0">الأجهزة المتصلة</h2><button class="x" id="vClose" aria-label="إغلاق" style="font-size:1.6rem">×</button></div>
+  <div class="hint" style="margin:0 4px 10px">كل جهاز دخل بحسابك. الأخضر فاتح التطبيق الحين. إذا شفت جهاز مو لك اضغط "طلّعه"، وبعدها غيّر كلمة المرور.</div>
+  <div class="box"><ul class="list" id="vList"></ul></div>
+  <div class="row" style="margin-top:10px"><button class="btn small" id="vName" style="min-height:48px">سمّ هذا الجهاز</button><button class="btn small" id="vKickAll" style="min-height:48px;color:var(--red)">طلّع كل الأجهزة الثانية</button></div>
+  <button class="btn" id="vPw" style="margin-top:10px">🔑 غيّر كلمة المرور</button>
+</div></div>
 <div class="sheet" id="xSheet" hidden><div class="panel" role="dialog" aria-modal="true" aria-labelledby="xTitle">
   <div class="acchead"><h2 id="xTitle" style="margin:0">حذف العمليات</h2><button class="x" id="xClose" aria-label="إغلاق" style="font-size:1.6rem">×</button></div>
   <div class="hint" style="margin:0 4px 10px">اختر العمليات الغلط واحذفها. البيع المحذوف يرجع للمخزون، والشراء المحذوف ينقص منه.</div>
@@ -398,7 +408,7 @@ body.locked{overflow:hidden}
 
 <script>
 // ---------- state ----------
-const S={items:[],months:{},meta:{},orders:[]}; // months: {"2026-10":[tx...]}
+const S={items:[],months:{},meta:{},orders:[],sessions:{}}; // months: {"2026-10":[tx...]}
 let shop=null;
 const LS='shop-ledger-v1';
 const $=id=>document.getElementById(id);
@@ -461,11 +471,12 @@ function applySnap(s){
     if(doc.id==='meta')meta=v;
     else if(doc.id==='items'){for(const id in (v.map||{})){const r=v.map[id];if(!r||typeof r!=='object'||r.name===undefined)continue;
       const it={id,name:r.name,qty:+r.qty||0,cost:+r.cost||0,at:r.at||0};items.push(it);itemsSynced[id]=itemRec(it)}}
+    else if(doc.id==='sessions')S.sessions=v.map||{};
     else if(doc.id==='orders'){for(const id in (v.map||{})){const r=v.map[id];if(r&&typeof r==='object'&&r.item!==undefined)orders.push(Object.assign({},r,{id}))}}
     else if(doc.id.startsWith('m_')){months[doc.id.slice(2)]=v.list||[];(v.list||[]).forEach(t=>tx.set(t.id,t))}});
   items.sort((a,b)=>(a.at-b.at)||a.name.localeCompare(b.name,'ar'));
   S.items=items;S.months=clone(months);S.meta=meta;S.orders=orders.sort((a,b)=>a.at-b.at);synced={items:itemsSynced,tx};
-  render();
+  render();checkKick();
 }
 window.addEventListener('error',e=>toast('صار خطأ: '+(e.message||'').slice(0,60)));
 function saveMeta(){if(shop)shop.doc('meta').set(clone(S.meta),{merge:true}).catch(saveErr)}
@@ -592,7 +603,7 @@ function render(){
   $('debtSum').innerHTML=`<div class="rline"><span>لي عند الناس</span><span class="amt r">${fmt(tOwed)}</span></div><div class="rline"><span>علي للناس</span><span class="amt g">${fmt(tOwe)}</span></div>`;
   const order=names.sort((a,b)=>(Math.abs(P[b].bal)>0.005)-(Math.abs(P[a].bal)>0.005)||(P[b].last>P[a].last?1:-1));
   $('accList').innerHTML=order.length?order.map(n=>{const b=P[n].bal;return `<li class="person" data-open="${esc(n)}"><div><div class="t">${esc(n)}</div><div class="s">${P[n].n} عملية · آخر حركة ${dmy(P[n].last)}</div></div><span class="amt ${b>0.005?'r':b<-0.005?'g':''}">${balTxt(b)}</span></li>`}).join(''):'<li class="empty">ما فيه حسابات. أضف أول مبلغ فوق</li>';
-  renderOrders();
+  renderOrders();drawDevices();
   if(!$('sheet').hidden&&curAcc)drawAccount();
 }
 function pickedLabel(){
@@ -912,7 +923,7 @@ const addDays=(k,n)=>{const d=pd(k);d.setDate(d.getDate()+n);return dkey(d)};
 $('menuBtn').onclick=e=>{e.stopPropagation();const m=$('menu');m.hidden=!m.hidden;$('menuBtn').setAttribute('aria-expanded',!m.hidden)};
 document.addEventListener('click',e=>{if(!e.target.closest('.menuwrap')){$('menu').hidden=true;$('menuBtn').setAttribute('aria-expanded','false')}});
 $('menu').addEventListener('click',e=>{const b=e.target.closest('[data-m]');if(!b)return;$('menu').hidden=true;
-  const m=b.dataset.m;if(m==='backup')openBackup();else if(m==='delete')openDel();else if(m==='lock')lockNow();else if(m==='logout')logout();else openRange(m,workDay())});
+  const m=b.dataset.m;if(m==='backup')openBackup();else if(m==='devices')openDevices();else if(m==='delete')openDel();else if(m==='lock')lockNow();else if(m==='logout')logout();else openRange(m,workDay())});
 // ---- weekly / monthly reports ----
 let rMode='week',rAnchor=dkey(),rText='';
 function rangeOf(mode,anchor){
@@ -1075,18 +1086,74 @@ async function tryUnlock(){
   const email=$('lockEmail').value.trim();if(!email){E.textContent='اكتب الإيميل';return}
   $('lockGo').disabled=true;E.textContent='';
   signingIn=true;
-  try{await auth.signInWithEmailAndPassword(email,pw);localStorage.setItem(LH,await sha(email+'\n'+pw));unlocked()}
+  try{localStorage.setItem('almahal-signin',Date.now());await auth.signInWithEmailAndPassword(email,pw);localStorage.setItem(LH,await sha(email+'\n'+pw));touchSession({signin:signinAt()});unlocked()}
   catch(e){$('lockPw').value='';E.textContent=e&&e.code==='auth/network-request-failed'?'ما فيه نت':'الإيميل أو كلمة المرور غلط';tooMany()}
   signingIn=false;if(fails<5)$('lockGo').disabled=false;
 }
 async function logout(){
   if(!await ask({title:'تسجيل خروج؟',msg:'بتحتاج الإيميل وكلمة المرور عشان تدخل مرة ثانية.',ok:'خروج'}))return;
+  if(shop)await shop.doc('sessions').set({map:{[DEV]:FV().delete()}},{merge:true}).catch(()=>{});
   localStorage.removeItem(LH);await auth.signOut();
 }
 $('lockGo').onclick=tryUnlock;
 $('lockPw').addEventListener('keydown',e=>{if(e.key==='Enter'&&!$('lockGo').disabled)tryUnlock()});
 $('lockSwitch').onclick=async()=>{localStorage.removeItem(LH);await auth.signOut()};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenAt=Date.now();else if(hiddenAt&&Date.now()-hiddenAt>5*60*1000)lockNow()});
+
+// ---------- devices / sessions ----------
+const DEV=(()=>{let d=localStorage.getItem('almahal-dev');if(!d){d='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);localStorage.setItem('almahal-dev',d)}return d})();
+function devGuess(){const u=navigator.userAgent||'';
+  const os=/iPad/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1)?'آيباد':/iPhone/.test(u)?'آيفون':/Android/.test(u)?(/Mobile/.test(u)?'جوال أندرويد':'تابلت أندرويد'):/Windows/.test(u)?'كمبيوتر ويندوز':/Mac/.test(u)?'ماك':'جهاز';
+  const br=/EdgA?\//.test(u)?'Edge':/SamsungBrowser/.test(u)?'Samsung':/CriOS|Chrome\//.test(u)?'Chrome':/FxiOS|Firefox/.test(u)?'Firefox':/Safari/.test(u)?'Safari':'';
+  return os+(br?' · '+br:'')}
+const signinAt=()=>+localStorage.getItem('almahal-signin')||0;
+function touchSession(extra){if(!shop||!auth||!auth.currentUser)return;
+  const me=S.sessions[DEV]||{};
+  const rec=Object.assign({auto:devGuess(),seen:Date.now(),first:me.first||Date.now()},extra||{});
+  S.sessions[DEV]=Object.assign({},me,rec);
+  shop.doc('sessions').set({map:{[DEV]:rec}},{merge:true}).catch(()=>{});}
+let kicking=false;
+function checkKick(){const me=S.sessions[DEV];
+  if(kicking||!me||!me.kickedAt||me.kickedAt<=signinAt()||!auth||!auth.currentUser)return;
+  kicking=true;localStorage.removeItem(LH);
+  Promise.resolve(auth.signOut()).finally(()=>{kicking=false;setTimeout(()=>{$('lockErr').textContent='انطلّع هذا الجهاز من جهاز ثاني. ادخل مرة ثانية بالإيميل وكلمة المرور.'},150)});}
+const ONLINE=4*60*1000;
+const devName=v=>v.name||v.auto||'جهاز';
+function drawDevices(){
+  const rows=Object.entries(S.sessions||{}).filter(([,v])=>v&&typeof v==='object').sort((a,b)=>(b[1].seen||0)-(a[1].seen||0));
+  $('vList').innerHTML=rows.length?rows.map(([id,v])=>{
+    const on=Date.now()-(v.seen||0)<ONLINE,me=id===DEV,out=v.kickedAt&&v.kickedAt>(v.signin||0);
+    const ago=v.seen?(on?'فاتح الحين':'آخر ظهور '+dmy(dkey(new Date(v.seen)))+' '+new Date(v.seen).toLocaleTimeString('ar',{hour:'numeric',minute:'2-digit'})):'';
+    return `<li><div><div class="t"><span class="dot ${on&&!out?'on':''}"></span>${esc(devName(v))}${me?' <span class="low" style="background:var(--bg);color:var(--mute)">هذا الجهاز</span>':''}</div><div class="s">${out?'انطلّع':ago}${v.auto&&v.name?' · '+esc(v.auto):''}</div></div>
+      ${me?'':out?`<button class="vbtn" data-vdel="${id}">شيله</button>`:`<button class="vbtn" data-vkick="${id}">طلّعه</button>`}</li>`}).join(''):'<li class="empty">ما فيه أجهزة</li>';
+  const n=rows.filter(([id,v])=>Date.now()-(v.seen||0)<ONLINE&&!(v.kickedAt&&v.kickedAt>(v.signin||0))).length;
+  $('devTxt').textContent=n?`(${n})`:'';
+}
+function kickIds(ids){if(!ids.length||!shop)return;const map={},t=Date.now();ids.forEach(id=>{map[id]={kickedAt:t};S.sessions[id]=Object.assign({},S.sessions[id],{kickedAt:t})});shop.doc('sessions').set({map},{merge:true}).catch(saveErr);drawDevices()}
+function openDevices(){drawDevices();$('vSheet').hidden=false}
+$('vClose').onclick=()=>$('vSheet').hidden=true;
+$('vSheet').addEventListener('click',async e=>{
+  if(e.target.id==='vSheet'){$('vSheet').hidden=true;return}
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.vkick){const v=S.sessions[b.dataset.vkick]||{};if(!await ask({title:'تطلّع هذا الجهاز؟',msg:devName(v)+'\nبينطلب منه الإيميل وكلمة المرور عشان يدخل مرة ثانية.',ok:'طلّعه',danger:true}))return;kickIds([b.dataset.vkick]);toast('انطلّع الجهاز')}
+  else if(b.dataset.vdel){const id=b.dataset.vdel;delete S.sessions[id];shop.doc('sessions').set({map:{[id]:FV().delete()}},{merge:true}).catch(saveErr);drawDevices()}
+});
+$('vKickAll').onclick=async()=>{const ids=Object.keys(S.sessions).filter(id=>id!==DEV);if(!ids.length)return toast('ما فيه أجهزة ثانية');
+  if(!await ask({title:'تطلّع كل الأجهزة الثانية؟',msg:`${ids.length} جهاز بينطلب منهم يدخلون مرة ثانية. هذا الجهاز يبقى.`,ok:'طلّعهم',danger:true}))return;kickIds(ids);toast('انطلّعت الأجهزة الثانية')};
+$('vName').onclick=async()=>{const r=await ask({title:'اسم هذا الجهاز',msg:'مثلاً: جوالي، تابلت المحل',fields:[{label:'الاسم',value:(S.sessions[DEV]||{}).name||devGuess()}]});if(!r)return;touchSession({name:r[0].trim().slice(0,40)});drawDevices()};
+$('vPw').onclick=async()=>{
+  const r=await ask({title:'تغيير كلمة المرور',msg:'بعد التغيير كل الأجهزة الثانية تنطلّع وتحتاج كلمة المرور الجديدة.',fields:[{label:'كلمة المرور الحالية',type:'password'},{label:'الجديدة (6 أحرف أو أكثر)',type:'password'},{label:'أعد كتابة الجديدة',type:'password'}],ok:'غيّرها'});
+  if(!r)return;const[cur,n1,n2]=r;
+  if(n1.length<6)return ask({title:'كلمة المرور قصيرة',msg:'لازم 6 أحرف أو أكثر',ok:'تمام'});
+  if(n1!==n2)return ask({title:'ما تتطابق',msg:'الكلمتين الجديدة مو نفس بعض',ok:'تمام'});
+  const u=auth.currentUser;
+  try{await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,cur));await u.updatePassword(n1);
+    localStorage.setItem(LH,await sha(u.email+'\n'+n1));kickIds(Object.keys(S.sessions).filter(id=>id!==DEV));
+    ask({title:'تغيّرت كلمة المرور ✓',msg:'احفظ كلمة المرور الجديدة عندك. الأجهزة الثانية انطلّعت.',ok:'تمام'})}
+  catch(e){ask({title:'ما تغيّرت',msg:e&&/wrong-password|invalid-credential|invalid-login/.test(e.code||'')?'كلمة المرور الحالية غلط':e&&e.code==='auth/network-request-failed'?'ما فيه نت':'صار خطأ، جرّب مرة ثانية',ok:'تمام'})}
+};
+setInterval(()=>{if(!document.hidden)touchSession()},2*60*1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)touchSession()});
 
 function boot(){
   const cfg=window.FIREBASE_CONFIG;
@@ -1101,6 +1168,7 @@ function boot(){
     if(!u){shop=null;S.items=[];S.months={};S.meta={};S.orders=[];synced={items:{},tx:new Map()};render();showLogin(false);return}
     shop=fdb.collection('shop');
     unsub=shop.onSnapshot(applySnap,e=>{console.error(e);toast(e&&e.code==='permission-denied'?'هذا الحساب ما عنده صلاحية على بيانات المحل':'انقطع الاتصال')});
+    setTimeout(()=>touchSession(),1500);
     if(signingIn)return; // just signed in: unlocked() handles it
     showLogin(true); // returning user: ask for password to unlock
   });
