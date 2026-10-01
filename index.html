@@ -188,6 +188,7 @@ body.locked{overflow:hidden}
       <button role="menuitem" data-m="week">📅 التقرير الأسبوعي</button>
       <button role="menuitem" data-m="month">🗓️ التقرير الشهري</button>
       <button role="menuitem" data-m="delete">🗑️ حذف العمليات</button>
+      <button role="menuitem" data-m="owner" hidden>👑 دخول المالك</button>
       <button role="menuitem" data-m="devices">📱 الأجهزة المتصلة <small class="date" id="devTxt"></small></button>
       <button role="menuitem" data-m="lock">🔒 قفل التطبيق</button>
       <button role="menuitem" data-m="logout">🚪 تسجيل خروج</button>
@@ -358,6 +359,7 @@ body.locked{overflow:hidden}
   <div class="box"><ul class="list" id="vList"></ul></div>
   <div class="row" style="margin-top:10px"><button class="btn small" id="vName" style="min-height:48px">سمّ هذا الجهاز</button><button class="btn small" id="vKickAll" style="min-height:48px;color:var(--red)">طلّع كل الأجهزة الثانية</button></div>
   <button class="btn" id="vPw" style="margin-top:10px">🔑 غيّر كلمة المرور</button>
+  <button class="btn small" id="vOwn" style="margin-top:10px;min-height:48px">👑 غيّر رمز المالك</button>
 </div></div>
 <div class="sheet" id="xSheet" hidden><div class="panel" role="dialog" aria-modal="true" aria-labelledby="xTitle">
   <div class="acchead"><h2 id="xTitle" style="margin:0">حذف العمليات</h2><button class="x" id="xClose" aria-label="إغلاق" style="font-size:1.6rem">×</button></div>
@@ -923,7 +925,7 @@ const addDays=(k,n)=>{const d=pd(k);d.setDate(d.getDate()+n);return dkey(d)};
 $('menuBtn').onclick=e=>{e.stopPropagation();const m=$('menu');m.hidden=!m.hidden;$('menuBtn').setAttribute('aria-expanded',!m.hidden)};
 document.addEventListener('click',e=>{if(!e.target.closest('.menuwrap')){$('menu').hidden=true;$('menuBtn').setAttribute('aria-expanded','false')}});
 $('menu').addEventListener('click',e=>{const b=e.target.closest('[data-m]');if(!b)return;$('menu').hidden=true;
-  const m=b.dataset.m;if(m==='backup')openBackup();else if(m==='devices')openDevices();else if(m==='delete')openDel();else if(m==='lock')lockNow();else if(m==='logout')logout();else openRange(m,workDay())});
+  const m=b.dataset.m;if(m==='backup')openBackup();else if(m==='devices')openDevices();else if(m==='owner')ownerLogin();else if(m==='delete')openDel();else if(m==='lock')lockNow();else if(m==='logout')logout();else openRange(m,workDay())});
 // ---- weekly / monthly reports ----
 let rMode='week',rAnchor=dkey(),rText='';
 function rangeOf(mode,anchor){
@@ -1115,7 +1117,7 @@ function touchSession(extra){if(!shop||!auth||!auth.currentUser)return;
 let kicking=false;
 function checkKick(){const me=S.sessions[DEV];
   if(kicking||!me||!me.kickedAt||me.kickedAt<=signinAt()||!auth||!auth.currentUser)return;
-  kicking=true;localStorage.removeItem(LH);
+  kicking=true;localStorage.removeItem(LH);localStorage.removeItem(OWN);
   Promise.resolve(auth.signOut()).finally(()=>{kicking=false;setTimeout(()=>{$('lockErr').textContent='انطلّع هذا الجهاز من جهاز ثاني. ادخل مرة ثانية بالإيميل وكلمة المرور.'},150)});}
 const ONLINE=4*60*1000;
 const devName=v=>v.name||v.auto||'جهاز';
@@ -1124,14 +1126,33 @@ function drawDevices(){
   $('vList').innerHTML=rows.length?rows.map(([id,v])=>{
     const on=Date.now()-(v.seen||0)<ONLINE,me=id===DEV,out=v.kickedAt&&v.kickedAt>(v.signin||0);
     const ago=v.seen?(on?'فاتح الحين':'آخر ظهور '+dmy(dkey(new Date(v.seen)))+' '+new Date(v.seen).toLocaleTimeString('ar',{hour:'numeric',minute:'2-digit'})):'';
-    return `<li><div><div class="t"><span class="dot ${on&&!out?'on':''}"></span>${esc(devName(v))}${me?' <span class="low" style="background:var(--bg);color:var(--mute)">هذا الجهاز</span>':''}</div><div class="s">${out?'انطلّع':ago}${v.auto&&v.name?' · '+esc(v.auto):''}</div></div>
+    return `<li><div><div class="t"><span class="dot ${on&&!out?'on':''}"></span>${esc(devName(v))}${v.owner?' 👑':''}${me?' <span class="low" style="background:var(--bg);color:var(--mute)">هذا الجهاز</span>':''}</div><div class="s">${out?'انطلّع':ago}${v.auto&&v.name?' · '+esc(v.auto):''}</div></div>
       ${me?'':out?`<button class="vbtn" data-vdel="${id}">شيله</button>`:`<button class="vbtn" data-vkick="${id}">طلّعه</button>`}</li>`}).join(''):'<li class="empty">ما فيه أجهزة</li>';
   const n=rows.filter(([id,v])=>Date.now()-(v.seen||0)<ONLINE&&!(v.kickedAt&&v.kickedAt>(v.signin||0))).length;
-  $('devTxt').textContent=n?`(${n})`:'';
+  $('devTxt').textContent=n?`(${n})`:'';ownerMenu();
 }
 function kickIds(ids){if(!ids.length||!shop)return;const map={},t=Date.now();ids.forEach(id=>{map[id]={kickedAt:t};S.sessions[id]=Object.assign({},S.sessions[id],{kickedAt:t})});shop.doc('sessions').set({map},{merge:true}).catch(saveErr);drawDevices()}
-function openDevices(){drawDevices();$('vSheet').hidden=false}
+// ---- owner only ----
+const OWN='almahal-owner';
+const isOwner=()=>!(S.meta&&S.meta.ownerHash)||localStorage.getItem(OWN)===S.meta.ownerHash;
+function ownerMenu(){const o=isOwner();document.querySelector('[data-m="devices"]').hidden=!o;document.querySelector('[data-m="owner"]').hidden=o}
+async function setOwnerCode(){
+  const r=await ask({title:'رمز المالك',msg:'حط رمز خاص فيك. الأجهزة المتصلة ما تظهر إلا للجهاز اللي يدخل هذا الرمز.\n(غير كلمة مرور الحساب، لا تعطيه أحد)',fields:[{label:'الرمز (4 أرقام أو أكثر)',type:'password'},{label:'أعد كتابة الرمز',type:'password'}],ok:'احفظ'});
+  if(!r)return false;
+  if(r[0].length<4){await ask({title:'الرمز قصير',msg:'لازم 4 أرقام أو أكثر',ok:'تمام'});return false}
+  if(r[0]!==r[1]){await ask({title:'ما يتطابق',msg:'الرمزين مو نفس بعض',ok:'تمام'});return false}
+  const h=await sha('owner\n'+r[0]);S.meta.ownerHash=h;localStorage.setItem(OWN,h);saveMeta();touchSession({owner:true});ownerMenu();return true}
+async function ownerLogin(){
+  const r=await ask({title:'دخول المالك',msg:'اكتب رمز المالك',fields:[{label:'الرمز',type:'password'}],ok:'دخول'});if(!r)return;
+  const h=await sha('owner\n'+r[0]);
+  if(h!==S.meta.ownerHash)return ask({title:'الرمز غلط',ok:'تمام'});
+  localStorage.setItem(OWN,h);touchSession({owner:true});ownerMenu();toast('هذا الجهاز صار للمالك');openDevices()}
+async function openDevices(){
+  if(!isOwner())return ownerLogin();
+  if(!(S.meta&&S.meta.ownerHash)&&!await setOwnerCode())return;
+  drawDevices();$('vSheet').hidden=false}
 $('vClose').onclick=()=>$('vSheet').hidden=true;
+$('vOwn').onclick=async()=>{if(await setOwnerCode())toast('تغيّر رمز المالك. الأجهزة الثانية تحتاج الرمز الجديد')};
 $('vSheet').addEventListener('click',async e=>{
   if(e.target.id==='vSheet'){$('vSheet').hidden=true;return}
   const b=e.target.closest('button');if(!b)return;
