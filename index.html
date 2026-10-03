@@ -605,7 +605,7 @@ function render(){
   $('debtSum').innerHTML=`<div class="rline"><span>لي عند الناس</span><span class="amt r">${fmt(tOwed)}</span></div><div class="rline"><span>علي للناس</span><span class="amt g">${fmt(tOwe)}</span></div>`;
   const order=names.sort((a,b)=>(Math.abs(P[b].bal)>0.005)-(Math.abs(P[a].bal)>0.005)||(P[b].last>P[a].last?1:-1));
   $('accList').innerHTML=order.length?order.map(n=>{const b=P[n].bal;return `<li class="person" data-open="${esc(n)}"><div><div class="t">${esc(n)}</div><div class="s">${P[n].n} عملية · آخر حركة ${dmy(P[n].last)}</div></div><span class="amt ${b>0.005?'r':b<-0.005?'g':''}">${balTxt(b)}</span></li>`}).join(''):'<li class="empty">ما فيه حسابات. أضف أول مبلغ فوق</li>';
-  renderOrders();drawDevices();
+  renderOrders();try{drawDevices()}catch(e){}
   if(!$('sheet').hidden&&curAcc)drawAccount();
 }
 function pickedLabel(){
@@ -1076,21 +1076,32 @@ function showLogin(signedIn){
 function lockNow(){showLogin(!!(auth&&auth.currentUser))}
 function unlocked(){fails=0;$('lock').hidden=true;document.body.classList.remove('locked');$('lockPw').value=''}
 function tooMany(){fails++;if(fails>=5){$('lockGo').disabled=true;$('lockErr').textContent='محاولات كثيرة، انتظر 30 ثانية';setTimeout(()=>{$('lockGo').disabled=false;$('lockErr').textContent='';fails=0},30000)}}
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej({code:'timeout'}),ms))]);
+function authMsg(e){const c=(e&&e.code)||(e&&e.message)||'unknown';
+  if(/wrong-password|invalid-credential|user-not-found|invalid-login|invalid-email/.test(c))return 'الإيميل أو كلمة المرور غلط';
+  if(/network/.test(c))return 'ما فيه نت، تأكد من الاتصال';
+  if(/too-many-requests/.test(c))return 'محاولات كثيرة، انتظر دقيقة وجرّب';
+  if(/user-disabled/.test(c))return 'الحساب موقّف من Firebase';
+  if(/unauthorized-domain/.test(c))return 'الموقع مو مضاف في النطاقات المصرح بها في Firebase';
+  if(c==='timeout')return 'ما رد السيرفر. سكّر التطبيق وافتح الرابط من المتصفح وجرّب';
+  return 'ما قدر يدخل ('+String(c).replace(/^auth\//,'')+')'}
 async function tryUnlock(){
-  const pw=$('lockPw').value;if(!pw)return;const E=$('lockErr');
+  const E=$('lockErr');const pw=$('lockPw').value;if(!pw){E.textContent='اكتب كلمة المرور';return}
   const u=auth&&auth.currentUser;
   if(u){ // already signed in on this device: quick unlock
     const h=localStorage.getItem(LH);
     if(h&&h===await sha(u.email+'\n'+pw))return unlocked();
-    try{await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,pw));localStorage.setItem(LH,await sha(u.email+'\n'+pw));return unlocked()}
-    catch(e){$('lockPw').value='';E.textContent='كلمة المرور غلط';tooMany();return}
+    $('lockGo').textContent='جاري الدخول…';
+    try{await withTimeout(u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,pw)),20000);localStorage.setItem(LH,await sha(u.email+'\n'+pw));$('lockGo').textContent='دخول';return unlocked()}
+    catch(e){$('lockGo').textContent='دخول';$('lockPw').value='';E.textContent=authMsg(e);if(e.code!=='timeout')tooMany();return}
   }
   const email=$('lockEmail').value.trim();if(!email){E.textContent='اكتب الإيميل';return}
   $('lockGo').disabled=true;E.textContent='';
   signingIn=true;
-  try{localStorage.setItem('almahal-signin',Date.now());await auth.signInWithEmailAndPassword(email,pw);localStorage.setItem(LH,await sha(email+'\n'+pw));touchSession({signin:signinAt()});unlocked()}
-  catch(e){$('lockPw').value='';E.textContent=e&&e.code==='auth/network-request-failed'?'ما فيه نت':'الإيميل أو كلمة المرور غلط';tooMany()}
-  signingIn=false;if(fails<5)$('lockGo').disabled=false;
+  $('lockGo').textContent='جاري الدخول…';
+  try{if(!auth)throw{code:'firebase-not-loaded'};localStorage.setItem('almahal-signin',Date.now());await withTimeout(auth.signInWithEmailAndPassword(email,pw),20000);localStorage.setItem(LH,await sha(email+'\n'+pw));touchSession({signin:signinAt()});unlocked()}
+  catch(e){$('lockPw').value='';E.textContent=authMsg(e);if(e.code!=='timeout')tooMany()}
+  $('lockGo').textContent='دخول';signingIn=false;if(fails<5)$('lockGo').disabled=false;
 }
 async function logout(){
   if(!await ask({title:'تسجيل خروج؟',msg:'بتحتاج الإيميل وكلمة المرور عشان تدخل مرة ثانية.',ok:'خروج'}))return;
@@ -1103,12 +1114,12 @@ $('lockSwitch').onclick=async()=>{localStorage.removeItem(LH);await auth.signOut
 document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenAt=Date.now();else if(hiddenAt&&Date.now()-hiddenAt>5*60*1000)lockNow()});
 
 // ---------- devices / sessions ----------
-const DEV=(()=>{let d=localStorage.getItem('almahal-dev');if(!d){d='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);localStorage.setItem('almahal-dev',d)}return d})();
+const DEV=(()=>{let d=null;try{d=localStorage.getItem('almahal-dev')}catch(e){}if(!d){d='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);try{localStorage.setItem('almahal-dev',d)}catch(e){}}return d})();
 function devGuess(){const u=navigator.userAgent||'';
   const os=/iPad/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1)?'آيباد':/iPhone/.test(u)?'آيفون':/Android/.test(u)?(/Mobile/.test(u)?'جوال أندرويد':'تابلت أندرويد'):/Windows/.test(u)?'كمبيوتر ويندوز':/Mac/.test(u)?'ماك':'جهاز';
   const br=/EdgA?\//.test(u)?'Edge':/SamsungBrowser/.test(u)?'Samsung':/CriOS|Chrome\//.test(u)?'Chrome':/FxiOS|Firefox/.test(u)?'Firefox':/Safari/.test(u)?'Safari':'';
   return os+(br?' · '+br:'')}
-const signinAt=()=>+localStorage.getItem('almahal-signin')||0;
+const signinAt=()=>{try{return +localStorage.getItem('almahal-signin')||0}catch(e){return 0}};
 function touchSession(extra){if(!shop||!auth||!auth.currentUser)return;
   const me=S.sessions[DEV]||{};
   const rec=Object.assign({auto:devGuess(),seen:Date.now(),first:me.first||Date.now()},extra||{});
@@ -1134,7 +1145,7 @@ function drawDevices(){
 function kickIds(ids){if(!ids.length||!shop)return;const map={},t=Date.now();ids.forEach(id=>{map[id]={kickedAt:t};S.sessions[id]=Object.assign({},S.sessions[id],{kickedAt:t})});shop.doc('sessions').set({map},{merge:true}).catch(saveErr);drawDevices()}
 // ---- owner only ----
 const OWN='almahal-owner';
-const isOwner=()=>!(S.meta&&S.meta.ownerHash)||localStorage.getItem(OWN)===S.meta.ownerHash;
+const isOwner=()=>{if(!(S.meta&&S.meta.ownerHash))return true;try{return localStorage.getItem(OWN)===S.meta.ownerHash}catch(e){return false}};
 function ownerMenu(){const o=isOwner();document.querySelector('[data-m="devices"]').hidden=!o;document.querySelector('[data-m="owner"]').hidden=o}
 async function setOwnerCode(){
   const r=await ask({title:'رمز المالك',msg:'حط رمز خاص فيك. الأجهزة المتصلة ما تظهر إلا للجهاز اللي يدخل هذا الرمز.\n(غير كلمة مرور الحساب، لا تعطيه أحد)',fields:[{label:'الرمز (4 أرقام أو أكثر)',type:'password'},{label:'أعد كتابة الرمز',type:'password'}],ok:'احفظ'});
@@ -1179,7 +1190,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)touchSessi
 function boot(){
   const cfg=window.FIREBASE_CONFIG;
   if(!window.firebase||!cfg||!cfg.apiKey||/PASTE/.test(cfg.apiKey)){
-    showLogin(false);$('lockGo').disabled=true;$('lockErr').textContent='الإعدادات ناقصة: عدّل ملف firebase-config.js وحط بيانات مشروعك';return}
+    showLogin(false);$('lockErr').textContent=!window.firebase?'ما تحمّل Firebase. تأكد من النت وسكّر التطبيق وافتحه مرة ثانية':'الإعدادات ناقصة: ملف firebase-config.js';return}
   firebase.initializeApp(cfg);
   const fdb=firebase.firestore();
   fdb.enablePersistence({synchronizeTabs:true}).catch(()=>{}); // works offline, syncs when back online
