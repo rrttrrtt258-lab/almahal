@@ -591,7 +591,6 @@ function render(){
    ${r.creditSales?`<div class="rline"><span>· دين</span><span class="r">${fmt(r.creditSales)}</span></div>`:''}
    <div class="rline"><span>تكلفة البضاعة المباعة</span><span>${fmt(r.costs)}</span></div>
    <div class="rline"><span>الخرج</span><span class="a">${fmt(r.exp)}</span></div>
-   <div class="rline"><span>المشتريات</span><span>${fmt(r.buys)}</span></div>
    ${r.payIn?`<div class="rline"><span>تسديدات وصلتني</span><span>${fmt(r.payIn)}</span></div>`:''}
    ${r.col?`<div class="rline"><span>تحصيل ديون</span><span class="g">${fmt(r.col)}</span></div>${r.colCash?`<div class="rline"><span>· كاش</span><span>${fmt(r.colCash)}</span></div>`:''}${r.colCard?`<div class="rline"><span>· شبكة</span><span>${fmt(r.colCard)}</span></div>`:''}${r.colTr?`<div class="rline"><span>· حوالة RM</span><span>${fmt(r.colTr)}</span></div>`:''}${r.colTam?`<div class="rline"><span>· تمارا</span><span>${fmt(r.colTam)}</span></div>`:''}`:''}
    <div class="rsep"></div>
@@ -1077,7 +1076,6 @@ function drawRange(){
    <div class="rline"><span>· دين</span><span class="r">${fmt(r.creditSales)}</span></div>
    <div class="rline"><span>تكلفة البضاعة المباعة</span><span>${fmt(r.costs)}</span></div>
    <div class="rline"><span>الخرج</span><span class="a">${fmt(r.exp)}</span></div>
-   <div class="rline"><span>المشتريات</span><span>${fmt(r.buys)}</span></div>
    <div class="rsep"></div>
    <div class="total"><span>صافي الربح<br><small class="date">البيع ناقص تكلفة المنتج</small></span><span class="big ${r.net<0?'r':'g'}">${fmt(r.net)}</span></div>`;
   // per day
@@ -1089,7 +1087,7 @@ function drawRange(){
   const top={};r.T.filter(t=>t.type==='sale').forEach(t=>{const o=top[t.name]=top[t.name]||{q:0,s:0,p:0};o.q+=t.qty;o.s+=t.total;o.p+=t.total-t.cost});
   const tl=Object.entries(top).sort((a,b)=>b[1].q-a[1].q).slice(0,5);
   $('rTop').innerHTML=tl.length?tl.map(([n,o])=>`<li><div><div class="t">${esc(n)}</div><div class="s">${o.q} قطعة · ربح ${fmt(o.p)}</div></div><span class="amt">${fmt(o.s)}</span></li>`).join(''):'<li class="empty">ما فيه مبيعات</li>';
-  rText=`${title}\n${rangeTxt}\n\nالمبيعات: ${fmt(r.sales)} (${r.units} قطعة)\nنقد: ${fmt(r.cashSales)} · شبكة: ${fmt(r.cardSales)}${r.tamaraSales?' · تمارا: '+fmt(r.tamaraSales):''} · دين: ${fmt(r.creditSales)}\nتكلفة البضاعة المباعة: ${fmt(r.costs)}\nالخرج: ${fmt(r.exp)}\nالمشتريات: ${fmt(r.buys)}\nصافي الربح: ${fmt(r.net)}`+
+  rText=`${title}\n${rangeTxt}\n\nالمبيعات: ${fmt(r.sales)} (${r.units} قطعة)\nنقد: ${fmt(r.cashSales)} · شبكة: ${fmt(r.cardSales)}${r.tamaraSales?' · تمارا: '+fmt(r.tamaraSales):''} · دين: ${fmt(r.creditSales)}\nتكلفة البضاعة المباعة: ${fmt(r.costs)}\nالخرج: ${fmt(r.exp)}\nصافي الربح: ${fmt(r.net)}`+
     (tl.length?`\n\nالأكثر مبيعاً:\n`+tl.map(([n,o])=>`${n}: ${o.q} قطعة`).join('\n'):'');
 }
 $('rPrev').onclick=()=>{const {from}=rangeOf(rMode,rAnchor);rAnchor=addDays(from,-1);drawRange()};
@@ -1181,7 +1179,7 @@ $('bFile').onchange=async()=>{
 };
 $('copyRep').onclick=async()=>{
   const day=workDay(),r=dayReport(day);
-  const txt=`تقرير ${day}\nالمبيعات: ${fmt(r.sales)} (${r.units} قطعة)\nنقد: ${fmt(r.cashSales)} · شبكة: ${fmt(r.cardSales)}${r.tamaraSales?' · تمارا: '+fmt(r.tamaraSales):''} · دين: ${fmt(r.creditSales)}\nتكلفة البضاعة المباعة: ${fmt(r.costs)}\nالخرج: ${fmt(r.exp)}\nالمشتريات: ${fmt(r.buys)}\nصافي الربح: ${fmt(r.net)}`;
+  const txt=`تقرير ${day}\nالمبيعات: ${fmt(r.sales)} (${r.units} قطعة)\nنقد: ${fmt(r.cashSales)} · شبكة: ${fmt(r.cardSales)}${r.tamaraSales?' · تمارا: '+fmt(r.tamaraSales):''} · دين: ${fmt(r.creditSales)}\nتكلفة البضاعة المباعة: ${fmt(r.costs)}\nالخرج: ${fmt(r.exp)}\nصافي الربح: ${fmt(r.net)}`;
   try{await navigator.clipboard.writeText(txt);toast('انسخ التقرير')}catch(e){ask({title:'انسخ التقرير',fields:[{label:'اضغط مطولاً وانسخ',value:txt,type:'textarea'}],ok:'تم'})}
 };
 document.querySelector('nav').addEventListener('click',e=>{
