@@ -303,6 +303,16 @@ body.locked{overflow:hidden}
     <div class="side"><button class="alayh" id="dAlayh">عليه <b>▼</b></button><button class="lah" id="dLah">له <b>▲</b></button></div>
     <div class="err" id="dErr"></div>
   </div>
+  <details class="box" id="cinvBox" style="margin-top:12px">
+    <summary style="font-weight:700;cursor:pointer;min-height:40px;display:flex;align-items:center">📋 فاتورة بالدين من Claude</summary>
+    <div class="hint" style="margin:8px 0">زبون أخذ بضاعة بالدين؟ صوّر فاتورته وارسلها لـ Claude، والصق الأصناف هنا. اللي موجود في المخزون ينخصم منه.</div>
+    <textarea id="ciTxt" dir="rtl" placeholder="زبون: أحمد&#10;داش كام شاومي A800SE | 2 | 550&#10;حساس Type C | 2 | 80" style="width:100%;min-height:140px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px"></textarea>
+    <label for="ciWho">اسم الزبون</label><input id="ciWho" autocomplete="off" list="people">
+    <label for="ciDate">التاريخ</label><input id="ciDate" type="date" autocomplete="off">
+    <div id="ciPrev" style="margin-top:10px"></div>
+    <button class="btn" id="ciGo">سجّلها عليه</button>
+    <div class="err" id="ciErr"></div>
+  </details>
   <h2>الحسابات</h2>
   <div class="box">
     <div class="combo"><input id="stWho" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="stWhoOpts" placeholder="ابحث عن اسم وافتح حسابه"><ul class="opts" id="stWhoOpts" role="listbox" hidden></ul></div>
@@ -650,6 +660,47 @@ function impPreview(){
   $('impPrev').innerHTML=`<ul class="list">${rows.map(r=>{const ex=S.items.find(x=>norm(x.name)===norm(r.name));return `<li><div><div class="t">${esc(r.name)}${ex?'':' <span class="low" style="background:var(--bg);color:var(--mute)">جديد</span>'}</div><div class="s">${r.qty} × ${fmt(r.cost)}</div></div><div class="t">${fmt(r.qty*r.cost)}</div></li>`}).join('')}</ul><div class="t" style="display:flex;justify-content:space-between;padding:8px 2px;border-top:1px solid var(--line)"><span>الإجمالي (${rows.length} صنف)</span><span>${fmt(tot)}</span></div>`;
 }
 $('impTxt').addEventListener('input',impPreview);
+// ---- customer invoice on credit ----
+function parseCi(){
+  const rows=[];let who='';
+  for(let L of $('ciTxt').value.split(/\r?\n/)){
+    L=L.replace(/^[\s`*\-•]+|[\s`*]+$/g,'');if(!L)continue;
+    const m=L.match(/^(?:زبون|الزبون|العميل|عميل|الاسم)\s*[:：]\s*(.+)$/);if(m){who=m[1].trim();continue}
+    if(/^(?:مورد|المورد)\s*[:：]/.test(L))continue;
+    const p=L.split(/\s*[|｜]\s*/);if(p.length<3)continue;
+    const name=p[0].trim(),qty=numA(p[1]),price=numA(p[2]);
+    if(name&&qty>0&&price>=0&&p[2].trim()!==''){const i=S.items.find(x=>norm(x.name)===norm(name));rows.push({name,qty,price,i})}
+  }
+  return{rows,who};
+}
+function ciPreview(){
+  const{rows,who}=parseCi();
+  if(who&&!$('ciWho').value.trim())$('ciWho').value=who;
+  if(!rows.length){$('ciPrev').innerHTML=$('ciTxt').value.trim()?'<div class="hint">ما قدرت أقرا أي صنف، تأكد إن كل سطر كذا: الاسم | الكمية | سعر الحبة</div>':'';return}
+  const tot=rows.reduce((a,r)=>a+r.qty*r.price,0);
+  $('ciPrev').innerHTML=`<ul class="list">${rows.map(r=>{const tag=!r.i?'<span class="low" style="background:var(--bg);color:var(--mute)">مو في المخزون</span>':r.i.qty<r.qty?`<span class="low">المتوفر ${r.i.qty}</span>`:'';
+    return `<li><div><div class="t">${esc(r.name)} ${tag}</div><div class="s">${r.qty} × ${fmt(r.price)}</div></div><div class="t">${fmt(r.qty*r.price)}</div></li>`}).join('')}</ul><div class="t" style="display:flex;justify-content:space-between;padding:8px 2px;border-top:1px solid var(--line)"><span>الإجمالي عليه (${rows.length} صنف)</span><span>${fmt(tot)}</span></div>`;
+}
+$('ciTxt').addEventListener('input',ciPreview);
+$('ciGo').onclick=async()=>{
+  const E=m=>$('ciErr').textContent=m;const{rows}=parseCi();
+  if(!rows.length)return E('الصق الأصناف أول');
+  const person=known($('ciWho').value.trim());if(!person)return E('اكتب اسم الزبون');
+  const short=rows.filter(r=>r.i&&r.i.qty<r.qty);
+  if(short.length)return E('الكمية ما تكفي: '+short.map(r=>`${r.i.name} (المتوفر ${r.i.qty})`).join('، '));
+  const day=$('ciDate').value||workDay(),tot=rows.reduce((a,r)=>a+r.qty*r.price,0);
+  const outside=rows.filter(r=>!r.i).length;
+  if(!await ask({title:`تسجلها على ${person}؟`,msg:`${rows.length} صنف · الإجمالي ${fmt(tot)}${outside?`\n${outside} صنف مو في المخزون، بينسجل كمبلغ عليه بدون ما يأثر على المخزون`:''}`,ok:'سجّلها'}))return;
+  let stock=false;
+  for(const r of rows){
+    const total=r.qty*r.price;
+    if(r.i){r.i.qty-=r.qty;stock=true;addTx({type:'sale',itemId:r.i.id,name:r.i.name,qty:r.qty,total,cost:r.i.cost*r.qty,pay:'credit',credit:true,person,day})}
+    else addTx({type:'entry',person,amount:total,side:'a',note:`${r.qty} × ${r.name}`,day});
+  }
+  if(stock)saveItems();
+  E('');$('ciTxt').value='';$('ciWho').value='';$('ciPrev').innerHTML='';$('cinvBox').open=false;render();
+  toast(`انسجلت ${fmt(tot)} على ${person}`);offerSend(person);
+};
 $('impGo').onclick=async()=>{
   const E=m=>$('impErr').textContent=m;const{rows}=parseImp();
   if(!rows.length)return E('الصق الأصناف أول');
