@@ -505,7 +505,7 @@ function ledgerAll(){
     if(!t.person)return;
     if(t.type==='sale'&&payOf(t)==='credit')L.push({t,side:'a',amt:t.total,note:`${t.qty} ${t.name}`});
     else if(t.type==='buy'&&payOf(t)==='credit')L.push({t,side:'l',amt:t.total,note:`${t.qty} ${t.name} (بضاعة منه)`});
-    else if(t.type==='entry')L.push({t,side:t.side,amt:t.amount,note:t.note||''});
+    else if(t.type==='entry')L.push({t,side:t.side,amt:t.amount,note:[t.method?METH[t.method]:'',t.note||''].filter(Boolean).join(' · ')||''});
     else if(t.type==='debt')L.push({t,side:t.dir==='owed'?'a':'l',amt:t.amount,note:t.note||'دين'});
     else if(t.type==='pay')L.push({t,side:t.dir==='owed'?'l':'a',amt:t.amount,note:'تسديد'});
   });
@@ -528,15 +528,17 @@ const dmy=d=>d.split('-').reverse().join('-');
 function dayReport(day){return reportFor(t=>t.day===day)}
 function reportFor(f){
   const T=allTx().filter(f);
-  const r={sales:0,cashSales:0,cardSales:0,creditSales:0,profit:0,units:0,buys:0,cashBuys:0,exp:0,payIn:0,payOut:0,T};
+  const r={sales:0,cashSales:0,cardSales:0,creditSales:0,profit:0,units:0,buys:0,cashBuys:0,exp:0,payIn:0,payOut:0,colCash:0,colCard:0,colTr:0,T};
   T.forEach(t=>{
     if(t.type==='sale'){r.sales+=t.total;r.units+=t.qty;r.profit+=t.total-t.cost;const p=payOf(t);if(p==='credit')r.creditSales+=t.total;else if(p==='card')r.cardSales+=t.total;else r.cashSales+=t.total}
     if(t.type==='buy'){r.buys+=t.total;if(payOf(t)==='cash')r.cashBuys+=t.total}
     if(t.type==='exp')r.exp+=t.amount;
     if(t.type==='pay'){t.dir==='owed'?r.payIn+=t.amount:r.payOut+=t.amount}
+    if(t.type==='entry'&&t.side==='l'&&t.method){if(t.method==='cash')r.colCash+=t.amount;else if(t.method==='card')r.colCard+=t.amount;else r.colTr+=t.amount}
   });
   r.net=r.profit;r.costs=r.sales-r.profit;
-  r.cash=r.cashSales+r.payIn-r.cashBuys-r.exp-r.payOut;
+  r.col=r.colCash+r.colCard+r.colTr;
+  r.cash=r.cashSales+r.payIn+r.colCash-r.cashBuys-r.exp-r.payOut;
   return r;
 }
 function describe(t){
@@ -544,7 +546,7 @@ function describe(t){
   if(t.type==='buy')return{t:`شراء ${t.qty} ${t.name}`,s:(t.person?t.person+' · ':'')+(payOf(t)==='credit'?'آجل':PAY[payOf(t)]),a:'−'+fmt(t.total),c:'r'};
   if(t.type==='exp')return{t:t.note||'خرج',s:'خرج',a:'−'+fmt(t.amount),c:'a'};
   if(t.type==='debt')return{t:`دين ${t.dir==='owed'?'لي عند':'علي لـ'} ${t.person}`,s:t.note||'',a:fmt(t.amount),c:''};
-  if(t.type==='entry')return{t:`${t.side==='a'?'عليه':'له'}: ${t.person}`,s:t.note||'',a:fmt(t.amount),c:t.side==='a'?'r':'g'};
+  if(t.type==='entry')return{t:`${t.side==='a'?'عليه':'له'}: ${t.person}`,s:[t.method?'سداد '+METH[t.method]:'',t.note||''].filter(Boolean).join(' · '),a:fmt(t.amount),c:t.side==='a'?'r':'g'};
   if(t.type==='pay')return{t:`تسديد ${t.dir==='owed'?'من':'إلى'} ${t.person}`,s:'',a:(t.dir==='owed'?'+':'−')+fmt(t.amount),c:t.dir==='owed'?'g':'r'};
 }
 async function undo(t){
@@ -578,6 +580,7 @@ function render(){
    <div class="rline"><span>الخرج</span><span class="a">${fmt(r.exp)}</span></div>
    <div class="rline"><span>المشتريات</span><span>${fmt(r.buys)}</span></div>
    ${r.payIn?`<div class="rline"><span>تسديدات وصلتني</span><span>${fmt(r.payIn)}</span></div>`:''}
+   ${r.col?`<div class="rline"><span>تحصيل ديون</span><span class="g">${fmt(r.col)}</span></div>${r.colCash?`<div class="rline"><span>· كاش</span><span>${fmt(r.colCash)}</span></div>`:''}${r.colCard?`<div class="rline"><span>· شبكة</span><span>${fmt(r.colCard)}</span></div>`:''}${r.colTr?`<div class="rline"><span>· حوالة RM</span><span>${fmt(r.colTr)}</span></div>`:''}`:''}
    <div class="rsep"></div>
    <div class="total"><span>صافي الربح<br><small class="date">البيع ناقص تكلفة المنتج</small></span><span class="big ${r.net<0?'r':'g'}">${fmt(r.net)}</span></div>
    <div class="rline"><span>صافي الكاش في الدرج</span><span>${fmt(r.cash)}</span></div>`;
@@ -825,19 +828,25 @@ $('addExp').onclick=()=>{
   if(!(amount>0))return $('eErr').textContent='اكتب المبلغ';
   addTx({type:'exp',note,amount});$('eErr').textContent='';$('eNote').value=$('eAmt').value='';render();toast('انسجل الخرج');
 };
-function addEntry(person,amount,note,day,side,errEl){
+const METH={cash:'كاش',card:'شبكة',transfer:'حوالة RM'};
+async function askMethod(person,amount){
+  const r=await ask({title:`كيف دفع ${person}؟`,msg:`المبلغ ${fmt(amount)}`,fields:[{label:'طريقة الدفع',type:'select',value:'cash',options:[['cash','💵 كاش'],['card','💳 شبكة'],['transfer','🏦 حوالة RM (رد ماستر)'],['','مو دفع (مبلغ له بس)']]}],ok:'سجّل'});
+  return r?r[0]:null}
+function addEntry(person,amount,note,day,side,errEl,method){
   if(!person){errEl.textContent='اكتب الاسم';return false}
   if(!(amount>0)){errEl.textContent='اكتب المبلغ';return false}
-  addTx({type:'entry',person,amount,note,side,day:day||workDay()});errEl.textContent='';
-  toast(`انسجل ${side==='a'?'عليه':'له'} ${fmt(amount)}`);return true;
+  const t={type:'entry',person,amount,note,side,day:day||workDay()};if(method)t.method=method;addTx(t);errEl.textContent='';
+  toast(`انسجل ${side==='a'?'عليه':'له'} ${fmt(amount)}${method?' · '+METH[method]:''}`);return true;
 }
 const known=n=>{const P=debts();const k=norm(n);return Object.keys(P).find(x=>norm(x)===k)||[...new Set(allTx().map(t=>t.person).filter(Boolean))].find(x=>norm(x)===k)||n};
-['dAlayh','dLah'].forEach(id=>$(id).onclick=()=>{
-  const person=known($('dWho').value.trim());
-  if(addEntry(person,+$('dAmt').value,$('dNote').value.trim(),$('dDate').value,id==='dAlayh'?'a':'l',$('dErr'))){$('dAmt').value=$('dNote').value='';$('dWho').value='';render();offerSend(person)}
+['dAlayh','dLah'].forEach(id=>$(id).onclick=async()=>{
+  const person=known($('dWho').value.trim());let method='';
+  if(id==='dLah'&&person&&+$('dAmt').value>0){method=await askMethod(person,+$('dAmt').value);if(method===null)return}
+  if(addEntry(person,+$('dAmt').value,$('dNote').value.trim(),$('dDate').value,id==='dAlayh'?'a':'l',$('dErr'),method)){$('dAmt').value=$('dNote').value='';$('dWho').value='';render();offerSend(person)}
 });
-['aAlayh','aLah'].forEach(id=>$(id).onclick=()=>{
-  if(addEntry(curAcc,+$('aAmt').value,$('aNote').value.trim(),$('aDate').value,id==='aAlayh'?'a':'l',$('aErr'))){$('aAmt').value=$('aNote').value='';render();offerSend(curAcc)}
+['aAlayh','aLah'].forEach(id=>$(id).onclick=async()=>{
+  let method='';if(id==='aLah'&&+$('aAmt').value>0){method=await askMethod(curAcc,+$('aAmt').value);if(method===null)return}
+  if(addEntry(curAcc,+$('aAmt').value,$('aNote').value.trim(),$('aDate').value,id==='aAlayh'?'a':'l',$('aErr'),method)){$('aAmt').value=$('aNote').value='';render();offerSend(curAcc)}
 });
 document.addEventListener('click',e=>{
   const del=e.target.closest&&e.target.closest('[data-del]')?e.target.closest('[data-del]').dataset.del:null;
@@ -870,13 +879,14 @@ async function editEntry(id){
     {label:'المبلغ',type:'number',value:String(amt)},
     {label:'عليه ولا له',type:'select',value:side,options:[['a','عليه ▼'],['l','له ▲']]},
     {label:'التاريخ',type:'date',value:t.day},
-    {label:'التفاصيل',value:note}],ok:'احفظ التعديل'});
+    {label:'التفاصيل',value:note},
+    {label:'طريقة الدفع (إذا له)',type:'select',value:t.method||'',options:[['','بدون'],['cash','💵 كاش'],['card','💳 شبكة'],['transfer','🏦 حوالة RM (رد ماستر)']]}],ok:'احفظ التعديل'});
   if(!r)return;
   const person=known(r[0].trim()),amount=numA(r[1]),ns=r[2],day=/^\d{4}-\d{2}-\d{2}$/.test(r[3])?r[3]:t.day,nnote=r[4].trim();
   if(!person)return ask({title:'الاسم فاضي',ok:'تمام'});
   if(!(amount>0))return ask({title:'المبلغ لازم يكون أكبر من صفر',ok:'تمام'});
   removeTx(t);
-  const n={type:'entry',person,amount,side:ns,note:nnote,day,id:uidGen(),at:t.at||Date.now()};
+  const n={type:'entry',person,amount,side:ns,note:nnote,day,id:uidGen(),at:t.at||Date.now()};if(ns==='l'&&r[5])n.method=r[5];
   const m=day.slice(0,7);(S.months[m]=S.months[m]||[]).push(n);saveMonth(m);
   if(curAcc&&norm(person)!==norm(curAcc))toast('انتقلت العملية لحساب '+person);else toast('تعدّلت العملية');
   render();
