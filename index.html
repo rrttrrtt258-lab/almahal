@@ -423,7 +423,7 @@ function allTx(){return Object.values(S.months).flat().sort((a,b)=>a.at-b.at)}
 function ask({title,msg='',fields=[],ok='حفظ',extra=null,danger=false}){
   return new Promise(res=>{
     $('dlgT').textContent=title;$('dlgMsg').textContent=msg;$('dlgErr').textContent='';
-    $('dlgF').innerHTML=fields.map((f,k)=>f.type==='textarea'?`<label>${esc(f.label)}</label><textarea id="dlgI${k}" readonly style="width:100%;min-height:180px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(f.value)}</textarea>`:`<label for="dlgI${k}">${esc(f.label)}</label><input id="dlgI${k}" type="${f.type||'text'}" ${f.type==='number'?'inputmode="decimal"':''} value="${esc(f.value??'')}">`).join('');
+    $('dlgF').innerHTML=fields.map((f,k)=>f.type==='select'?`<label for="dlgI${k}">${esc(f.label)}</label><select id="dlgI${k}" style="width:100%;min-height:48px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 10px">${f.options.map(o=>`<option value="${esc(o[0])}" ${o[0]===f.value?'selected':''}>${esc(o[1])}</option>`).join('')}</select>`:f.type==='textarea'?`<label>${esc(f.label)}</label><textarea id="dlgI${k}" readonly style="width:100%;min-height:180px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(f.value)}</textarea>`:`<label for="dlgI${k}">${esc(f.label)}</label><input id="dlgI${k}" type="${f.type||'text'}" ${f.type==='number'?'inputmode="decimal"':''} value="${esc(f.value??'')}">`).join('');
     const A=$('dlgA');A.innerHTML='';
     const done=v=>{$('dlg').hidden=true;res(v)};
     const mk=(t,cls,fn,style='')=>{const b=document.createElement('button');b.className='btn '+cls;b.textContent=t;b.style.cssText='margin:0;'+style;b.onclick=fn;A.appendChild(b)};
@@ -834,17 +834,53 @@ function addEntry(person,amount,note,day,side,errEl){
 const known=n=>{const P=debts();const k=norm(n);return Object.keys(P).find(x=>norm(x)===k)||[...new Set(allTx().map(t=>t.person).filter(Boolean))].find(x=>norm(x)===k)||n};
 ['dAlayh','dLah'].forEach(id=>$(id).onclick=()=>{
   const person=known($('dWho').value.trim());
-  if(addEntry(person,+$('dAmt').value,$('dNote').value.trim(),$('dDate').value,id==='dAlayh'?'a':'l',$('dErr'))){$('dAmt').value=$('dNote').value='';$('dWho').value='';render()}
+  if(addEntry(person,+$('dAmt').value,$('dNote').value.trim(),$('dDate').value,id==='dAlayh'?'a':'l',$('dErr'))){$('dAmt').value=$('dNote').value='';$('dWho').value='';render();offerSend(person)}
 });
 ['aAlayh','aLah'].forEach(id=>$(id).onclick=()=>{
-  if(addEntry(curAcc,+$('aAmt').value,$('aNote').value.trim(),$('aDate').value,id==='aAlayh'?'a':'l',$('aErr'))){$('aAmt').value=$('aNote').value='';render()}
+  if(addEntry(curAcc,+$('aAmt').value,$('aNote').value.trim(),$('aDate').value,id==='aAlayh'?'a':'l',$('aErr'))){$('aAmt').value=$('aNote').value='';render();offerSend(curAcc)}
 });
 document.addEventListener('click',e=>{
   const del=e.target.closest&&e.target.closest('[data-del]')?e.target.closest('[data-del]').dataset.del:null;
   if(del){const t=allTx().find(x=>x.id===del);if(t)undo(t);return}
+  const ed=e.target.closest&&e.target.closest('[data-edit]');
+  if(ed){editEntry(ed.dataset.edit);return}
   const li=e.target.closest('[data-open]');
   if(li)openStatement(li.dataset.open);
 });
+// ---- edit a debt entry ----
+async function editEntry(id){
+  const t=allTx().find(x=>x.id===id);if(!t)return;
+  if(t.type==='sale'||t.type==='buy'){
+    const r=await ask({title:t.type==='sale'?'تعديل بيعة بالدين':'تعديل بضاعة بالآجل',msg:`${t.qty} ${t.name}\n(الكمية ما تتعدل من هنا لأنها مربوطة بالمخزون)`,fields:[
+      {label:'الاسم',value:t.person},{label:'المبلغ',type:'number',value:String(t.total)},{label:'التاريخ',type:'date',value:t.day}],ok:'احفظ التعديل'});
+    if(!r)return;
+    const person=known(r[0].trim()),total=numA(r[1]),day=/^\d{4}-\d{2}-\d{2}$/.test(r[2])?r[2]:t.day;
+    if(!person)return ask({title:'الاسم فاضي',ok:'تمام'});
+    if(!(total>=0)||r[1].trim()==='')return ask({title:'اكتب المبلغ',ok:'تمام'});
+    if(t.type==='buy'){const i=S.items.find(x=>x.id===t.itemId);if(i&&i.qty>0&&total!==t.total){i.cost=Math.max(0,(i.qty*i.cost+total-t.total)/i.qty);saveItems()}}
+    removeTx(t);
+    const n=Object.assign({},t,{person,total,day,id:uidGen()});
+    const m=day.slice(0,7);(S.months[m]=S.months[m]||[]).push(n);saveMonth(m);
+    toast('تعدّلت العملية');render();return;
+  }
+  const side=t.type==='entry'?t.side:t.type==='debt'?(t.dir==='owed'?'a':'l'):(t.dir==='owed'?'l':'a');
+  const amt=t.amount,note=t.type==='pay'?(t.note||'تسديد'):(t.note||'');
+  const r=await ask({title:'تعديل العملية',fields:[
+    {label:'الاسم',value:t.person},
+    {label:'المبلغ',type:'number',value:String(amt)},
+    {label:'عليه ولا له',type:'select',value:side,options:[['a','عليه ▼'],['l','له ▲']]},
+    {label:'التاريخ',type:'date',value:t.day},
+    {label:'التفاصيل',value:note}],ok:'احفظ التعديل'});
+  if(!r)return;
+  const person=known(r[0].trim()),amount=numA(r[1]),ns=r[2],day=/^\d{4}-\d{2}-\d{2}$/.test(r[3])?r[3]:t.day,nnote=r[4].trim();
+  if(!person)return ask({title:'الاسم فاضي',ok:'تمام'});
+  if(!(amount>0))return ask({title:'المبلغ لازم يكون أكبر من صفر',ok:'تمام'});
+  removeTx(t);
+  const n={type:'entry',person,amount,side:ns,note:nnote,day,id:uidGen(),at:t.at||Date.now()};
+  const m=day.slice(0,7);(S.months[m]=S.months[m]||[]).push(n);saveMonth(m);
+  if(curAcc&&norm(person)!==norm(curAcc))toast('انتقلت العملية لحساب '+person);else toast('تعدّلت العملية');
+  render();
+}
 // ---- account view ----
 let curAcc=null;
 function openStatement(name){curAcc=known(name);$('aDate').value=workDay();$('aErr').textContent='';drawAccount();$('sheet').hidden=false;$('stWho').value=''}
@@ -853,7 +889,7 @@ function drawAccount(){
   $('accName').textContent=A.name;
   $('accBal').textContent=balTxt(A.bal);$('accBal').className='amt '+(A.bal>0.005?'r':A.bal<-0.005?'g':'');
   $('ledger').innerHTML=`<div class="lrow h"><span>التاريخ</span><span>المبلغ</span><span>التفاصيل</span><span>الرصيد</span><span></span></div>`+
-    (A.L.length?A.L.slice().reverse().map(e=>`<div class="lrow"><span class="d">${dmy(e.t.day)}</span><span class="m">${fmt(e.amt)}</span><span>${esc(e.note)}</span><span class="b">${fmt(Math.abs(e.bal))}<small class="${e.side==='a'?'r':'g'}">${e.side==='a'?'▼':'▲'}</small></span><button class="x" data-del="${e.t.id}" aria-label="حذف">×</button></div>`).join(''):'<div class="empty">ما فيه عمليات لهذا الاسم بعد. سجّل أول مبلغ فوق</div>');
+    (A.L.length?A.L.slice().reverse().map(e=>`<div class="lrow" data-edit="${e.t.id}" style="cursor:pointer"><span class="d">${dmy(e.t.day)}</span><span class="m">${fmt(e.amt)}</span><span>${esc(e.note)}</span><span class="b">${fmt(Math.abs(e.bal))}<small class="${e.side==='a'?'r':'g'}">${e.side==='a'?'▼':'▲'}</small></span><button class="x" data-del="${e.t.id}" aria-label="حذف">×</button></div>`).join(''):'<div class="empty">ما فيه عمليات لهذا الاسم بعد. سجّل أول مبلغ فوق</div>')+(A.L.length?'<div class="hint" style="text-align:center;margin-top:8px">اضغط على أي عملية عشان تعدّلها</div>':'');
 }
 function accText(A){
   return `كشف حساب: ${A.name}\nبتاريخ ${dmy(dkey())}\n\n`+A.L.map(e=>`${dmy(e.t.day)} | ${e.note} | ${e.side==='a'?'عليه':'له'} ${fmt(e.amt)} | الرصيد ${fmt(Math.abs(e.bal))}`).join('\n')+
@@ -901,6 +937,32 @@ async function buildPdf(A){
     if(p)pdf.addPage();pdf.addImage(cv.toDataURL('image/jpeg',0.9),'JPEG',0,0,595.28,841.89);
   }
   return pdf.output('blob');
+}
+// after a debt entry: offer to send the statement PDF on WhatsApp
+async function sharePdf(A,blob){
+  const fname=`كشف_${A.name.replace(/\s+/g,'_')}.pdf`;
+  try{const f=new File([blob],fname,{type:'application/pdf'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'كشف حساب '+A.name});return}}
+  catch(e){if(e&&e.name==='AbortError')return}
+  saveBlob(blob,fname);toast('انحفظ الكشف، أرسله له على الواتساب');
+}
+// preload the PDF library so the statement is ready instantly after a tap
+let pdfWarm=null;
+function warmPdf(){if(!pdfWarm)pdfWarm=loadJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js').then(()=>document.fonts&&Promise.all([document.fonts.load('400 28px "IBM Plex Sans Arabic"'),document.fonts.load('700 28px "IBM Plex Sans Arabic"'),document.fonts.load('700 48px "Readex Pro"')])).catch(()=>{pdfWarm=null});return pdfWarm}
+async function offerSend(person){
+  if(S.meta&&S.meta.noSendAsk)return;
+  const A=accountOf(person);if(!A.L.length)return;
+  // try to open the share sheet straight away (works while the tap is still fresh)
+  try{
+    const blob=await buildPdf(A);const f=new File([blob],`كشف_${A.name.replace(/\s+/g,'_')}.pdf`,{type:'application/pdf'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'كشف حساب '+A.name});return}
+  }catch(e){if(e&&e.name==='AbortError')return}
+  // phone needs another tap: one button
+  const pdfP=buildPdf(A).catch(()=>null); // build while the question is on screen
+  const ok=await ask({title:'انسجلت ✓',msg:`ترسل كشف الحساب PDF لـ ${A.name} على الواتساب؟\nالرصيد الحين: ${balTxt(A.bal)}`,ok:'📤 أرسل الكشف'});
+  if(!ok)return;
+  const blob=await pdfP;if(!blob)return toast('تعذّر تجهيز الـ PDF، تأكد من النت');
+  sharePdf(A,blob);
 }
 $('stPdf').onclick=async()=>{
   const b=$('stPdf');if(b.disabled)return;const A=accountOf(curAcc);
@@ -1074,7 +1136,7 @@ function showLogin(signedIn){
   setTimeout(()=>(signedIn?$('lockPw'):$('lockEmail')).focus(),80);
 }
 function lockNow(){showLogin(!!(auth&&auth.currentUser))}
-function unlocked(){fails=0;$('lock').hidden=true;document.body.classList.remove('locked');$('lockPw').value=''}
+function unlocked(){setTimeout(warmPdf,1500);fails=0;$('lock').hidden=true;document.body.classList.remove('locked');$('lockPw').value=''}
 function tooMany(){fails++;if(fails>=5){$('lockGo').disabled=true;$('lockErr').textContent='محاولات كثيرة، انتظر 30 ثانية';setTimeout(()=>{$('lockGo').disabled=false;$('lockErr').textContent='';fails=0},30000)}}
 const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej({code:'timeout'}),ms))]);
 function authMsg(e){const c=(e&&e.code)||(e&&e.message)||'unknown';
