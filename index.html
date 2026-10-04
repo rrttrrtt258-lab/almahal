@@ -218,6 +218,7 @@ body.locked{overflow:hidden}
     <button class="btn" id="addItem">أضف للمخزون</button>
     <div class="err" id="iErr"></div>
   </div>
+  <div id="impSlotInv"></div>
   <details class="box" id="impBox" style="margin-top:12px">
     <summary style="font-weight:700;cursor:pointer;min-height:40px;display:flex;align-items:center">📋 إضافة فاتورة من Claude</summary>
     <div class="hint" style="margin:8px 0">صوّر الفاتورة وارسلها لـ Claude، ينسخ لك الأصناف، والصقها هنا.</div>
@@ -256,6 +257,7 @@ body.locked{overflow:hidden}
 
 <!-- PURCHASE -->
 <section class="tab" id="t-buy">
+  <div id="impSlotBuy"></div>
   <h2>تسجيل شراء</h2>
   <div class="box">
     <label for="pSup">من (الشركة أو المورد)</label><div class="combo"><input id="pSup" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="pSupOpts" placeholder="مثلاً: شركة عين السماحة"><ul class="opts" id="pSupOpts" role="listbox" hidden></ul></div>
@@ -1184,6 +1186,7 @@ document.querySelector('nav').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
   document.querySelectorAll('nav button').forEach(x=>x.removeAttribute('aria-current'));b.setAttribute('aria-current','page');
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('on',s.id==='t-'+b.dataset.t));window.scrollTo(0,0);
+  if(b.dataset.t==='buy'||b.dataset.t==='inv'){const slot=$(b.dataset.t==='buy'?'impSlotBuy':'impSlotInv');slot.after($('impBox'));$('impBox').style.margin=b.dataset.t==='buy'?'0 0 12px':'12px 0 0'}
 });
 
 // ---- login & lock (Firebase Auth) ----
