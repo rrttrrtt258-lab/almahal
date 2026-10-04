@@ -1,6 +1,6 @@
 // Caches the app shell so it opens instantly and works without internet.
 // Bump VERSION whenever you change index.html so phones pick up the update.
-const VERSION = 'almahal-web-v17';
+const VERSION = 'almahal-web-v18';
 const SHELL = ['./', 'index.html', 'firebase-config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 
 self.addEventListener('install', e => {

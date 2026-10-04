@@ -201,7 +201,7 @@ body.locked{overflow:hidden}
 <!-- REPORT -->
 <section class="tab on" id="t-report">
   <div class="receipt" id="receipt"></div>
-  <button class="btn small" id="copyRep" style="margin:0 4px">نسخ التقرير</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 4px"><button class="btn small" id="repPdf" style="min-height:48px">📄 التقرير PDF</button><button class="btn small" id="copyRep" style="min-height:48px">نسخ التقرير</button></div>
   <h2>عمليات اليوم</h2>
   <div class="box"><ul class="list" id="dayOps"></ul></div>
 </section>
@@ -1001,6 +1001,69 @@ async function buildPdf(A){
   }
   return pdf.output('blob');
 }
+// ---- daily report as PDF ----
+async function buildReportPdf(){
+  await loadJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  const F='"IBM Plex Sans Arabic", Tahoma, sans-serif',FB='"Readex Pro", "IBM Plex Sans Arabic", Tahoma, sans-serif';
+  try{await Promise.all([document.fonts.load('400 28px "IBM Plex Sans Arabic"'),document.fonts.load('700 28px "IBM Plex Sans Arabic"'),document.fonts.load('700 48px "Readex Pro"')])}catch(e){}
+  const day=workDay();
+  const lines=[...$('receipt').querySelectorAll('.rline,.total')].map(el=>{const sp=el.querySelectorAll(':scope>span');
+    const lab=el.classList.contains('total')?'صافي الربح':(sp[0]?sp[0].textContent.trim():'');return{lab,val:sp.length?sp[sp.length-1].textContent.trim():'',total:el.classList.contains('total'),sub:/^·/.test(lab)}});
+  const ops=allTx().filter(t=>t.day===day&&t.type!=='buy').map(describe);
+  const W=1588,H=2246,M=80,RH=58;
+  const fit=(c,t,w)=>{t=String(t);if(c.measureText(t).width<=w)return t;while(t.length>1&&c.measureText(t+'…').width>w)t=t.slice(0,-1);return t+'…'};
+  const pdf=new window.jspdf.jsPDF({unit:'pt',format:'a4'});
+  let cv,c,y,page=0;
+  const newPage=()=>{if(c){c.fillStyle='#555';c.font='400 24px '+FB;c.textAlign='center';c.fillText(String(page),W/2,H-50);if(page>1)pdf.addPage();pdf.addImage(cv.toDataURL('image/jpeg',0.9),'JPEG',0,0,595.28,841.89)}
+    cv=document.createElement('canvas');cv.width=W;cv.height=H;c=cv.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,W,H);c.direction='rtl';c.textBaseline='middle';page++;y=M};
+  newPage();
+  c.fillStyle='#000';c.textAlign='center';c.font='700 54px '+FB;c.fillText('التقرير اليومي',W/2,y+40);
+  c.font='400 32px '+F;c.fillStyle='#333';c.fillText('المحل · '+new Date(day+'T12:00').toLocaleDateString('ar',{weekday:'long'})+' \u2066'+dmy(day)+'\u2069',W/2,y+105);
+  y+=170;
+  // summary
+  const bx=M+40,bw=W-2*M-80;
+  c.strokeStyle='#000';c.lineWidth=3;
+  lines.forEach(L=>{
+    const h=L.total?110:RH;
+    if(L.total){c.beginPath();c.setLineDash([10,8]);c.moveTo(bx,y+8);c.lineTo(bx+bw,y+8);c.stroke();c.setLineDash([])}
+    c.fillStyle=L.sub?'#555':'#000';c.textAlign='right';c.font=(L.total?'700 44px ':L.sub?'400 28px ':'400 32px ')+F;
+    c.fillText(L.lab,bx+bw-(L.sub?40:0),y+h/2+(L.total?6:0));
+    c.textAlign='left';c.font=(L.total?'700 56px ':L.sub?'400 28px ':'700 32px ')+FB;
+    c.fillStyle=L.total?(/^-/.test(L.val)?'#c0392b':'#1f7a3f'):L.sub?'#555':'#000';
+    c.fillText('\u2066'+L.val+'\u2069',bx,y+h/2+(L.total?6:0));
+    y+=h;
+  });
+  y+=50;
+  // operations table
+  if(ops.length){
+    c.fillStyle='#000';c.textAlign='right';c.font='700 36px '+FB;c.fillText(`عمليات اليوم (${ops.length})`,W-M,y);y+=40;
+    const cols=[['العملية',560],['التفاصيل',0],['المبلغ',220]];cols[1][1]=W-2*M-560-220;
+    const xs=[];let x=W-M;cols.forEach(cl=>{xs.push([x-cl[1],x]);x-=cl[1]});
+    const row=(vals,opt={})=>{
+      if(y+RH>H-110){newPage()}
+      if(opt.bg){c.fillStyle=opt.bg;c.fillRect(M,y,W-2*M,RH)}
+      c.strokeStyle='#b9c1c8';c.lineWidth=2;c.strokeRect(M,y,W-2*M,RH);xs.slice(0,-1).forEach(([a])=>{c.beginPath();c.moveTo(a,y);c.lineTo(a,y+RH);c.stroke()});
+      vals.forEach((v,k)=>{const[a,b]=xs[k];c.font=(opt.bold?'700 ':'400 ')+'26px '+(k===2?FB:F);c.fillStyle=k===2&&opt.color?opt.color:'#000';
+        if(k===2){c.textAlign='center';c.fillText(fit(c,v,b-a-16),(a+b)/2,y+RH/2)}else{c.textAlign='right';c.fillText(fit(c,v,b-a-24),b-12,y+RH/2)}});
+      y+=RH};
+    row(cols.map(cl=>cl[0]),{bg:'#e9edf0',bold:true});
+    ops.forEach(o=>row([o.t,o.s||'','\u2066'+o.a+'\u2069'],{color:o.c==='r'?'#c0392b':o.c==='g'?'#1f7a3f':'#000'}));
+  }
+  c.fillStyle='#555';c.font='400 24px '+FB;c.textAlign='center';c.fillText(String(page),W/2,H-50);
+  if(page>1)pdf.addPage();pdf.addImage(cv.toDataURL('image/jpeg',0.9),'JPEG',0,0,595.28,841.89);
+  return pdf.output('blob');
+}
+$('repPdf').onclick=async()=>{
+  const b=$('repPdf');if(b.disabled)return;b.disabled=true;b.textContent='جاري التجهيز...';
+  const fname=`تقرير_${workDay()}.pdf`;
+  try{const blob=await buildReportPdf();let shared=false;
+    try{const f=new File([blob],fname,{type:'application/pdf'});
+      if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'التقرير اليومي '+dmy(workDay())});shared=true}}
+    catch(e){if(e&&e.name==='AbortError')shared=true}
+    if(!shared){saveBlob(blob,fname);toast('انحفظ التقرير PDF')}
+  }catch(e){toast('تعذّر تجهيز الـ PDF، تأكد من النت')}
+  b.disabled=false;b.textContent='📄 التقرير PDF';
+};
 // after a debt entry: offer to send the statement PDF on WhatsApp
 async function sharePdf(A,blob){
   const fname=`كشف_${A.name.replace(/\s+/g,'_')}.pdf`;
