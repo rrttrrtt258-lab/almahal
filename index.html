@@ -550,7 +550,7 @@ function reportFor(f){
   });
   r.net=r.profit;r.costs=r.sales-r.profit;
   r.col=r.colCash+r.colCard+r.colTr+r.colTam;
-  r.cash=r.cashSales+r.payIn+r.colCash-r.cashBuys-r.exp-r.payOut;
+  r.cash=r.cashSales+r.payIn+r.colCash-r.exp-r.payOut; // purchases are not taken from the drawer
   return r;
 }
 function describe(t){
