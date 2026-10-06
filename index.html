@@ -740,11 +740,21 @@ $('addOrd').onclick=()=>{
   const o={id:uidGen(),kind,name,phone,item:it,day:workDay(),at:Date.now(),done:0};
   S.orders.push(o);saveOrder(o);E('');$('oName').value=$('oPhone').value=$('oItem').value='';oHint();render();toast('انسجلت الطلبية');
 };
+// WhatsApp message for an order (supplier: all open items for that supplier in one message)
+function ordWa(o){
+  let msg;
+  if(o.kind==='c')msg=`السلام عليكم ${o.name}\nطلبك (${o.item}) وصل المحل، تقدر تمر تستلمه.\nحياك الله`;
+  else{const L=S.orders.filter(x=>!x.done&&x.kind!=='c'&&norm(x.name)===norm(o.name));
+    msg=`السلام عليكم ${o.name}\nأبغى أطلب:\n`+L.map((x,k)=>`${k+1}- ${x.item}`).join('\n')+'\nوشكراً';}
+  const withPh=o.phone?o:S.orders.find(x=>x.phone&&x.kind===o.kind&&norm(x.name)===norm(o.name));
+  const n=withPh?waNum(withPh.phone):'';
+  return (n?`https://wa.me/${n}`:'https://wa.me/')+'?text='+encodeURIComponent(msg);
+}
 function ordLi(o){
   const ph=digits(o.phone);const done=!!o.done;
   return `<li class="ord"><div class="top"><div class="t">${esc(o.item)}</div><div class="s">${dmy(o.day)}</div></div>
    <div class="s">${o.kind==='c'?'زبون':'مورد'}: ${esc(o.name)}${o.phone?' · <span dir="ltr">'+esc(o.phone)+'</span>':''}${done?' · '+(o.kind==='c'?'تسلّمها':'وصلت')+' '+dmy(dkey(new Date(o.done))):''}</div>
-   <div class="oacts">${!done&&ph?`<a href="tel:${esc(ph)}">📞 اتصال</a><a href="https://wa.me/${esc(waNum(o.phone))}" target="_blank" rel="noopener">واتساب</a>`:''}
+   <div class="oacts">${!done&&ph?`<a href="tel:${esc(ph)}">📞 اتصال</a>`:''}${!done?`<a href="${esc(ordWa(o))}" target="_blank" rel="noopener">💬 ${o.kind==='c'?'بلّغه واتساب':'أرسل الطلبية واتساب'}</a>`:''}
    ${done?`<button data-oundo="${o.id}">↩ رجّعها</button>`:`<button class="done" data-odone="${o.id}">✓ ${o.kind==='c'?'تسلّمها':'وصلت'}</button>`}
    <button data-odel="${o.id}" style="color:var(--red)">حذف</button></div></li>`;
 }
