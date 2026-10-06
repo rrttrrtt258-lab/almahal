@@ -334,6 +334,7 @@ body.locked{overflow:hidden}
     <button class="btn" id="addOrd">سجّل الطلبية</button>
     <div class="err" id="oErr"></div>
   </div>
+  <button class="btn" id="oPdf" style="margin-top:12px">📄 كل الطلبيات PDF</button>
   <h2 id="oCTitle">طلبات الزبائن</h2>
   <div class="box"><ul class="list" id="oCList"></ul></div>
   <h2 id="oSTitle">طلبات من الموردين</h2>
@@ -1011,6 +1012,56 @@ async function buildPdf(A){
   }
   return pdf.output('blob');
 }
+// ---- open orders as PDF ----
+async function buildOrdersPdf(mode){
+  await loadJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  const F='"IBM Plex Sans Arabic", Tahoma, sans-serif',FB='"Readex Pro", "IBM Plex Sans Arabic", Tahoma, sans-serif';
+  try{await Promise.all([document.fonts.load('400 28px "IBM Plex Sans Arabic"'),document.fonts.load('700 28px "IBM Plex Sans Arabic"'),document.fonts.load('700 48px "Readex Pro"')])}catch(e){}
+  const open=S.orders.filter(o=>!o.done);
+  const groups=mode==='items'?[['الطلبيات',open]]:[['طلبات الزبائن',open.filter(o=>o.kind==='c')],['طلبات من الموردين',open.filter(o=>o.kind!=='c')]].filter(g=>g[1].length);
+  const W=1588,H=2246,M=80,RH=60;
+  const fit=(c,t,w)=>{t=String(t);if(c.measureText(t).width<=w)return t;while(t.length>1&&c.measureText(t+'…').width>w)t=t.slice(0,-1);return t+'…'};
+  const pdf=new window.jspdf.jsPDF({unit:'pt',format:'a4'});
+  let cv,c,y,page=0;
+  const flush=()=>{c.fillStyle='#555';c.font='400 24px '+FB;c.textAlign='center';c.fillText(String(page),W/2,H-50);if(page>1)pdf.addPage();pdf.addImage(cv.toDataURL('image/jpeg',0.9),'JPEG',0,0,595.28,841.89)};
+  const newPage=()=>{if(c)flush();cv=document.createElement('canvas');cv.width=W;cv.height=H;c=cv.getContext('2d');c.fillStyle='#fff';c.fillRect(0,0,W,H);c.direction='rtl';c.textBaseline='middle';page++;y=M};
+  newPage();
+  c.fillStyle='#000';c.textAlign='center';c.font='700 54px '+FB;c.fillText('الطلبيات',W/2,y+40);
+  c.font='400 32px '+F;c.fillStyle='#333';c.fillText('المحل · \u2066'+dmy(dkey())+'\u2069 · '+open.length+' طلبية',W/2,y+105);y+=170;
+  const cols=mode==='items'?[['#',90],['الصنف',0],['التاريخ',230]]:[['#',90],['الصنف',0],['الاسم',330],['الجوال',270],['التاريخ',210]];
+  cols[1][1]=W-2*M-cols.reduce((a,c2)=>a+c2[1],0);
+  const xs=[];let x=W-M;cols.forEach(cl=>{xs.push([x-cl[1],x]);x-=cl[1]});
+  const row=(vals,opt={})=>{
+    if(y+RH>H-110){newPage();if(!opt.head)row(cols.map(cl=>cl[0]),{bg:'#e9edf0',bold:true,head:true})}
+    if(opt.bg){c.fillStyle=opt.bg;c.fillRect(M,y,W-2*M,RH)}
+    c.strokeStyle='#b9c1c8';c.lineWidth=2;c.strokeRect(M,y,W-2*M,RH);xs.slice(0,-1).forEach(([a])=>{c.beginPath();c.moveTo(a,y);c.lineTo(a,y+RH);c.stroke()});
+    vals.forEach((v,k)=>{const[a,b]=xs[k];const num=k===0||cols[k][0]==='التاريخ'||cols[k][0]==='الجوال';c.font=(opt.bold?'700 ':'400 ')+'27px '+(num?FB:F);c.fillStyle='#000';
+      if(num){c.textAlign='center';c.fillText(fit(c,'\u2066'+v+'\u2069',b-a-12),(a+b)/2,y+RH/2)}else{c.textAlign='right';c.fillText(fit(c,v,b-a-24),b-12,y+RH/2)}});
+    y+=RH};
+  groups.forEach(([title,L],gi)=>{
+    if(y+RH*3>H-110)newPage();
+    if(groups.length>1||mode!=='items'){c.fillStyle='#000';c.textAlign='right';c.font='700 36px '+FB;c.fillText(`${title} (${L.length})`,W-M,y+20);y+=55}
+    row(cols.map(cl=>cl[0]),{bg:'#e9edf0',bold:true,head:true});
+    L.forEach((o,k)=>row(mode==='items'?[String(k+1),o.item,dmy(o.day)]:[String(k+1),o.item,o.name||'',o.phone||'',dmy(o.day)]));
+    y+=45;
+  });
+  flush();
+  return pdf.output('blob');
+}
+$('oPdf').onclick=async()=>{
+  if(!S.orders.some(o=>!o.done))return toast('ما فيه طلبيات مفتوحة');
+  const r=await ask({title:'PDF الطلبيات',msg:'لمين بترسله؟',fields:[{label:'وش يكون فيه',type:'select',value:'items',options:[['items','الأصناف بس (للتاجر، بدون أسماء الزبائن)'],['full','كامل مع الأسماء والجوالات']]}],ok:'📄 جهّز PDF'});
+  if(!r)return;
+  const b=$('oPdf');b.disabled=true;b.textContent='جاري التجهيز...';
+  const fname=`طلبيات_${dkey()}.pdf`;
+  try{const blob=await buildOrdersPdf(r[0]);let shared=false;
+    try{const f=new File([blob],fname,{type:'application/pdf'});
+      if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'الطلبيات'});shared=true}}
+    catch(e){if(e&&e.name==='AbortError')shared=true}
+    if(!shared){saveBlob(blob,fname);toast('انحفظ PDF الطلبيات')}
+  }catch(e){toast('تعذّر تجهيز الـ PDF، تأكد من النت')}
+  b.disabled=false;b.textContent='📄 كل الطلبيات PDF';
+};
 // ---- daily report as PDF ----
 async function buildReportPdf(){
   await loadJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
